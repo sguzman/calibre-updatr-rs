@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use wait_timeout::ChildExt;
 
@@ -80,7 +80,7 @@ impl Runner {
         capture: bool,
         extra_env: Option<&HashMap<String, String>>,
     ) -> Result<CmdResult> {
-        self.run_with_timeout(cmd, capture, extra_env, None)
+        self.run_with_timeout(cmd, capture, extra_env, None, None)
     }
 
     pub fn run_with_timeout(
@@ -89,6 +89,7 @@ impl Runner {
         capture: bool,
         extra_env: Option<&HashMap<String, String>>,
         timeout: Option<Duration>,
+        heartbeat: Option<Duration>,
     ) -> Result<CmdResult> {
         if cmd.is_empty() {
             anyhow::bail!("empty command");
@@ -111,6 +112,7 @@ impl Runner {
         }
 
         let run_with_env = |env: &HashMap<String, String>| -> Result<CmdResult> {
+            let start = Instant::now();
             let mut command = Command::new(&cmd[0]);
             for arg in &cmd[1..] {
                 command.arg(arg);
@@ -126,25 +128,36 @@ impl Runner {
                 let mut child = command.spawn().with_context(|| {
                     format!("Failed to run command: {}", cmd.join(" "))
                 })?;
-                match child.wait_timeout(limit)? {
-                    Some(_) => {
-                        let output = child.wait_with_output()?;
-                        return Ok(CmdResult {
-                            status_code: output.status.code().unwrap_or(1),
-                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                            timed_out: false,
-                        });
-                    }
-                    None => {
-                        let _ = child.kill();
-                        let output = child.wait_with_output()?;
-                        return Ok(CmdResult {
-                            status_code: 124,
-                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                            timed_out: true,
-                        });
+                let tick = heartbeat.unwrap_or(Duration::from_secs(0));
+                let mut last_beat = Instant::now();
+                loop {
+                    let wait_dur = if tick.as_secs() == 0 { limit } else { Duration::from_secs(1) };
+                    match child.wait_timeout(wait_dur)? {
+                        Some(_) => {
+                            let output = child.wait_with_output()?;
+                            return Ok(CmdResult {
+                                status_code: output.status.code().unwrap_or(1),
+                                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                                timed_out: false,
+                            });
+                        }
+                        None => {
+                            if start.elapsed() >= limit {
+                                let _ = child.kill();
+                                let output = child.wait_with_output()?;
+                                return Ok(CmdResult {
+                                    status_code: 124,
+                                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                                    timed_out: true,
+                                });
+                            }
+                            if tick.as_secs() > 0 && last_beat.elapsed() >= tick {
+                                info!(elapsed_seconds = start.elapsed().as_secs(), "[fetch] still running...");
+                                last_beat = Instant::now();
+                            }
+                        }
                     }
                 }
             }

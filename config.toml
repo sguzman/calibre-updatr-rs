@@ -23,7 +23,8 @@ password = "admin"
 
 [fetch]
 headless = true
-timeout_seconds = 10
+timeout_seconds = 45
+heartbeat_seconds = 10
 headless_env = { QT_QPA_PLATFORM = "offscreen", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox --disable-gpu --use-gl=swiftshader", QTWEBENGINE_DISABLE_GPU = "1", QT_OPENGL = "software", LIBGL_ALWAYS_SOFTWARE = "1" }
 
 [policy]

@@ -31,6 +31,7 @@ fn process_one_book(
     scoring: &crate::config::ScoringConfig,
     delay_between_fetches_seconds: f64,
     fetch_timeout_seconds: u64,
+    fetch_heartbeat_seconds: u64,
     state_path: &Path,
     dry_run: bool,
 ) -> Result<String> {
@@ -156,6 +157,7 @@ fn process_one_book(
         &opf_path,
         &cover_path,
         fetch_timeout_seconds,
+        fetch_heartbeat_seconds,
     )?;
     if !ok_fetch {
         let status = if msg_fetch.contains("timed out") {
@@ -383,6 +385,7 @@ pub fn run() -> Result<()> {
                 &config.scoring,
                 config.policy.delay_between_fetches_seconds,
                 config.fetch.timeout_seconds,
+                config.fetch.heartbeat_seconds,
                 &state_path,
                 config.policy.dry_run,
             )?;

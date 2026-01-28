@@ -138,6 +138,7 @@ pub fn fetch_metadata_to_opf_and_cover(
     opf_path: &Path,
     cover_path: &Path,
     timeout_seconds: u64,
+    heartbeat_seconds: u64,
 ) -> Result<(bool, String)> {
     let title = book
         .get("title")
@@ -192,7 +193,13 @@ pub fn fetch_metadata_to_opf_and_cover(
     }
 
     info!(timeout_seconds, title = %title, "[fetch] starting fetch-ebook-metadata");
-    let cp = runner.run_with_timeout(&cmd, true, None, Some(std::time::Duration::from_secs(timeout_seconds)))?;
+    let cp = runner.run_with_timeout(
+        &cmd,
+        true,
+        None,
+        Some(std::time::Duration::from_secs(timeout_seconds)),
+        Some(std::time::Duration::from_secs(heartbeat_seconds)),
+    )?;
     if cp.timed_out {
         return Ok((false, format!("fetch-ebook-metadata timed out after {}s", timeout_seconds)));
     }

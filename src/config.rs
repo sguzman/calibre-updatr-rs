@@ -98,6 +98,7 @@ pub struct FetchConfig {
     pub headless: bool,
     pub headless_env: HashMap<String, String>,
     pub timeout_seconds: u64,
+    pub heartbeat_seconds: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -205,6 +206,7 @@ impl Default for FetchConfig {
                 ("LIBGL_ALWAYS_SOFTWARE".to_string(), "1".to_string()),
             ]),
             timeout_seconds: 45,
+            heartbeat_seconds: 10,
         }
     }
 }
