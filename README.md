@@ -38,6 +38,11 @@ Run against a specific library path:
 cargo run -- --library "/path/to/Calibre Library"
 ```
 
+Run against a running Calibre Content Server:
+```bash
+cargo run -- --library-url "http://localhost:8081/#en_nonfiction"
+```
+
 Set formats to process:
 ```bash
 cargo run -- --library "/path/to/Calibre Library" --formats epub,pdf

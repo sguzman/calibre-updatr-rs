@@ -49,9 +49,19 @@ enum CalibreEnvMode {
 #[derive(Parser, Debug)]
 #[command(name = "calibre-updatr")]
 #[command(about = "Calibre bulk metadata updater + format embedder", long_about = None)]
+#[command(group(
+    clap::ArgGroup::new("library_source")
+        .required(true)
+        .args(["library", "library_url"]),
+))]
 struct Args {
-    #[arg(long, required = true, help = "Path to Calibre library")]
-    library: String,
+    #[arg(long, help = "Path to Calibre library")]
+    library: Option<String>,
+    #[arg(
+        long,
+        help = "Calibre Content Server URL to the library (use when Calibre is running)"
+    )]
+    library_url: Option<String>,
     #[arg(
         long,
         default_value = None,
@@ -644,6 +654,14 @@ fn list_candidate_books(
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
         let stderr = cp.stderr.to_lowercase();
+        if stderr.contains("another calibre program such as calibre-server")
+            || stderr.contains("another calibre program such as calibre server")
+        {
+            anyhow::bail!(
+                "calibredb refused to use the library because Calibre (or calibre-server) is running.\n\
+Either close Calibre or pass --library-url pointing at the running Content Server."
+            );
+        }
         if stderr.contains("no books matching the search expression") {
             return Ok(vec![]);
         }
@@ -1118,7 +1136,11 @@ fn main() -> Result<()> {
     require_tool("calibredb")?;
     require_tool("fetch-ebook-metadata")?;
 
-    let lib = args.library.clone();
+    let lib = args
+        .library_url
+        .clone()
+        .or(args.library.clone())
+        .ok_or_else(|| anyhow::anyhow!("Missing --library or --library-url"))?;
     let is_remote = lib.starts_with("http://") || lib.starts_with("https://");
     let state_path = if let Some(p) = args.state_path.clone() {
         PathBuf::from(p)
