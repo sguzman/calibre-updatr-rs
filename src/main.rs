@@ -162,6 +162,15 @@ fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
+fn normalize_library_spec(spec: &str) -> String {
+    let trimmed = spec.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let without_trailing = trimmed.trim_end_matches('/');
+        return without_trailing.to_string();
+    }
+    trimmed.to_string()
+}
+
 fn should_clean_env_key(key: &str) -> bool {
     key.starts_with("PYTHON")
         || key.starts_with("VIRTUAL_ENV")
@@ -662,6 +671,13 @@ fn list_candidate_books(
 Either close Calibre or pass --library-url pointing at the running Content Server."
             );
         }
+        if stderr.contains("not found") && lib.starts_with("http") {
+            anyhow::bail!(
+                "calibredb returned Not Found for the library URL.\n\
+Check the Content Server URL and library id, and avoid a trailing slash after the fragment.\n\
+Example: --library-url \"http://localhost:8081/#en_nonfiction\""
+            );
+        }
         if stderr.contains("no books matching the search expression") {
             return Ok(vec![]);
         }
@@ -1136,11 +1152,12 @@ fn main() -> Result<()> {
     require_tool("calibredb")?;
     require_tool("fetch-ebook-metadata")?;
 
-    let lib = args
+    let lib_raw = args
         .library_url
         .clone()
         .or(args.library.clone())
         .ok_or_else(|| anyhow::anyhow!("Missing --library or --library-url"))?;
+    let lib = normalize_library_spec(&lib_raw);
     let is_remote = lib.starts_with("http://") || lib.starts_with("https://");
     let state_path = if let Some(p) = args.state_path.clone() {
         PathBuf::from(p)
