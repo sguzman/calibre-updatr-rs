@@ -47,6 +47,18 @@ Override config values from CLI (optional):
 cargo run -- --config config.toml --library-url "http://localhost:8081/#en_nonfiction"
 ```
 
+Duplicate Finder
+----------------
+Find duplicates by full-file BLAKE3 hash (fast + parallel):
+```bash
+cargo run -- dups --library "/path/to/Calibre Library"
+```
+Options:
+- `--ext` repeatable extension filter (e.g. `--ext epub --ext pdf`)
+- `--min-size` skip tiny files
+- `--threads` to control hashing parallelism
+- `--include-sidecars` to include `metadata.opf` / cover files
+
 State file
 ----------
 The state is stored under `./.cache/state.json` by default,

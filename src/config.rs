@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -37,6 +37,15 @@ pub struct Args {
         help = "Override: dry run (no changes)"
     )]
     pub dry_run: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Find duplicate files in a Calibre library via hashing
+    Dups(crate::dups::DupsArgs),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

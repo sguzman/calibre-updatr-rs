@@ -1,6 +1,7 @@
 mod app;
 mod calibre;
 mod config;
+mod dups;
 mod metadata;
 mod runner;
 mod state;

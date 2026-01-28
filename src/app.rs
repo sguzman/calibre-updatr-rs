@@ -3,8 +3,9 @@ use crate::calibre::{
     fetch_metadata_to_opf_and_cover, list_candidate_books, refresh_one_book,
 };
 use crate::config::{
-    init_tracing, load_config, normalize_library_spec, normalize_optional_string, Args,
+    init_tracing, load_config, normalize_library_spec, normalize_optional_string, Args, Command,
 };
+use crate::dups::run_dups;
 use crate::metadata::{metadata_snapshot, score_good_enough, snapshot_hash};
 use crate::runner::Runner;
 use crate::state::{get_book_state, load_state, now_iso, put_book_state, save_state, BookState};
@@ -245,8 +246,6 @@ fn process_one_book(
 
 pub fn run() -> Result<()> {
     let args = Args::parse();
-    require_tool("calibredb")?;
-    require_tool("fetch-ebook-metadata")?;
 
     let config_path = PathBuf::from(&args.config);
     let mut config = load_config(&config_path)?;
@@ -274,6 +273,20 @@ pub fn run() -> Result<()> {
     }
 
     init_tracing(&config.logging.level);
+
+    if let Some(Command::Dups(dups_args)) = &args.command {
+        let lib_override = dups_args.library.clone();
+        let lib_path = lib_override
+            .or_else(|| config.library.path.clone().map(PathBuf::from))
+            .ok_or_else(|| anyhow::anyhow!("Missing library path for dups"))?;
+        if !lib_path.is_dir() {
+            anyhow::bail!("Library path does not exist or is not a directory: {}", lib_path.display());
+        }
+        return run_dups(&lib_path, dups_args);
+    }
+
+    require_tool("calibredb")?;
+    require_tool("fetch-ebook-metadata")?;
 
     let lib_raw = config
         .library
