@@ -308,6 +308,7 @@ impl Runner {
         }
 
         let mut command = if self.fetch_use_xvfb {
+            info!("[fetch] using xvfb-run");
             let mut c = Command::new("xvfb-run");
             c.arg("-a");
             c.arg(&cmd[0]);

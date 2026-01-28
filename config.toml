@@ -26,7 +26,7 @@ headless = true
 timeout_seconds = 45
 heartbeat_seconds = 10
 use_xvfb = true
-headless_env = { QT_QPA_PLATFORM = "offscreen", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox --use-gl=swiftshader", QT_OPENGL = "software", LIBGL_ALWAYS_SOFTWARE = "1" }
+headless_env = { QT_QPA_PLATFORM = "xcb", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox", QT_OPENGL = "software", LIBGL_ALWAYS_SOFTWARE = "1" }
 
 [policy]
 dry_run = false

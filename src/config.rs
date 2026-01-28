@@ -196,11 +196,11 @@ impl Default for FetchConfig {
         Self {
             headless: true,
             headless_env: HashMap::from([
-                ("QT_QPA_PLATFORM".to_string(), "offscreen".to_string()),
+                ("QT_QPA_PLATFORM".to_string(), "xcb".to_string()),
                 ("QTWEBENGINE_DISABLE_SANDBOX".to_string(), "1".to_string()),
                 (
                     "QTWEBENGINE_CHROMIUM_FLAGS".to_string(),
-                    "--no-sandbox --use-gl=swiftshader".to_string(),
+                    "--no-sandbox".to_string(),
                 ),
                 ("QT_OPENGL".to_string(), "software".to_string()),
                 ("LIBGL_ALWAYS_SOFTWARE".to_string(), "1".to_string()),
