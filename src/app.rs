@@ -438,12 +438,7 @@ pub fn run() -> Result<()> {
 }
 
 fn default_state_path() -> Result<PathBuf> {
-    let base = std::env::var("XDG_CACHE_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".cache")))
-        .ok_or_else(|| anyhow::anyhow!("Unable to determine cache directory (set XDG_CACHE_HOME or HOME)"))?;
-    let dir = base.join("calibre-updatr");
+    let dir = std::env::current_dir()?.join(".cache");
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join("state.json"))
 }

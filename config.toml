@@ -6,7 +6,7 @@ path = ""
 url = "http://127.0.0.1:8081/#en_nonfiction"
 
 [state]
-# If empty, defaults to ~/.cache/calibre-updatr/state.json
+# If empty, defaults to ./.cache/state.json
 path = ""
 
 [formats]
@@ -23,7 +23,7 @@ password = "admin"
 
 [fetch]
 headless = true
-timeout_seconds = 45
+timeout_seconds = 10
 headless_env = { QT_QPA_PLATFORM = "offscreen", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox --disable-gpu --use-gl=swiftshader", QTWEBENGINE_DISABLE_GPU = "1", QT_OPENGL = "software", LIBGL_ALWAYS_SOFTWARE = "1" }
 
 [policy]

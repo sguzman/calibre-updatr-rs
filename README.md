@@ -49,5 +49,5 @@ cargo run -- --config config.toml --library-url "http://localhost:8081/#en_nonfi
 
 State file
 ----------
-The state is stored under `~/.cache/calibre-updatr/state.json` by default,
+The state is stored under `./.cache/state.json` by default,
 or `state.path` in config if provided.
