@@ -8,7 +8,7 @@ library_url = "http://localhost:8081/#en_nonfiction"
 state_path = ""
 
 # Formats to process
-formats = ["epub", "pdf"]
+formats = ["epub"]
 
 # Dry-run (no changes)
 dry_run = false
