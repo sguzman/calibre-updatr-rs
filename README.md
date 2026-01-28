@@ -22,12 +22,14 @@ Behavior
 
 Configuration
 -------------
-Edit in `src/main.rs`:
-- `--formats` CLI default is `epub`; update as needed if you want a different default.
-- `REPROCESS_ON_METADATA_CHANGE`: reprocess on metadata changes or not.
-- `MIN_SCORE_TO_SKIP_FETCH`: how strict “good enough” is.
-- `ENGLISH_CODES` / `INCLUDE_MISSING_LANGUAGE`: language filtering.
-- `DELAY_BETWEEN_FETCHES_SECONDS`: throttle external metadata fetching.
+All settings live in `config.toml`. Start from the provided template and edit:
+- `log_level`
+- `library` or `library_url`
+- `calibre_username` / `calibre_password`
+- `headless_fetch` + `headless_env`
+- `formats`
+- processing policy knobs (reprocess, scoring, languages, throttling)
+Note: `config.toml` can include credentials; consider excluding it from version control.
 
 Usage
 -----
@@ -35,30 +37,20 @@ Requires `calibredb` and `fetch-ebook-metadata` on your PATH.
 
 Logging
 -------
-Uses `tracing` + `tracing-subscriber`. Control verbosity via `RUST_LOG`:
+Uses `tracing` + `tracing-subscriber`. Control verbosity via `config.toml` or `RUST_LOG`:
 ```bash
-RUST_LOG=debug cargo run -- --library "/path/to/Calibre Library"
-RUST_LOG=info cargo run -- --library-url "http://localhost:8081/#en_nonfiction"
+RUST_LOG=debug cargo run -- --config config.toml
+RUST_LOG=info cargo run -- --config config.toml
 ```
 
-Run against a specific library path:
+Run with config:
 ```bash
-cargo run -- --library "/path/to/Calibre Library"
+cargo run -- --config config.toml
 ```
 
-Run against a running Calibre Content Server:
+Override config values from CLI (optional):
 ```bash
-cargo run -- --library-url "http://localhost:8081/#en_nonfiction"
-```
-
-Set formats to process:
-```bash
-cargo run -- --library "/path/to/Calibre Library" --formats epub,pdf
-```
-
-Dry run (no changes):
-```bash
-cargo run -- --library "/path/to/Calibre Library" --dry-run
+cargo run -- --config config.toml --library-url "http://localhost:8081/#en_nonfiction"
 ```
 
 State file
@@ -68,4 +60,4 @@ The state is stored in the library directory as:
 .calibre_metadata_state.json
 ```
 For remote libraries, the state file is stored in the current working directory
-unless `--state-path` is supplied.
+unless `state_path` is supplied in config.

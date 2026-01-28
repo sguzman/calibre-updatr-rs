@@ -1,0 +1,33 @@
+log_level = "info"
+
+# Calibre library (set one)
+library = ""
+library_url = "http://localhost:8081/#en_nonfiction"
+
+# State file override (empty = default behavior)
+state_path = ""
+
+# Formats to process
+formats = ["epub", "pdf"]
+
+# Dry-run (no changes)
+dry_run = false
+
+# calibredb environment handling: "inherit", "clean", or "override"
+calibredb_env = "inherit"
+debug_calibredb_env = false
+
+# Content Server auth (if required for write operations)
+calibre_username = "admin"
+calibre_password = "admin"
+
+# Fetch settings
+headless_fetch = true
+headless_env = { QT_QPA_PLATFORM = "offscreen", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox", LIBGL_ALWAYS_SOFTWARE = "1" }
+
+# Processing policy
+reprocess_on_metadata_change = false
+min_score_to_skip_fetch = 6
+include_missing_language = true
+english_codes = ["en", "eng", "en-us", "en-gb"]
+delay_between_fetches_seconds = 0.35

@@ -14,11 +14,9 @@ use std::time::Duration;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
-const ENGLISH_CODES: &[&str] = &["en", "eng", "en-us", "en-gb"];
-const INCLUDE_MISSING_LANGUAGE: bool = true;
-const MIN_SCORE_TO_SKIP_FETCH: i32 = 6;
-const DELAY_BETWEEN_FETCHES_SECONDS: f64 = 0.35;
-const REPROCESS_ON_METADATA_CHANGE: bool = false;
+const DEFAULT_ENGLISH_CODES: &[&str] = &["en", "eng", "en-us", "en-gb"];
+const DEFAULT_MIN_SCORE_TO_SKIP_FETCH: i32 = 6;
+const DEFAULT_DELAY_BETWEEN_FETCHES_SECONDS: f64 = 0.35;
 
 const CALIBRE_ENVS: &[&[(&str, &str)]] = &[
     &[
@@ -41,7 +39,8 @@ const CALIBRE_ENVS: &[&[(&str, &str)]] = &[
     ],
 ];
 
-#[derive(ValueEnum, Clone, Copy, Debug)]
+#[derive(ValueEnum, Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum CalibreEnvMode {
     Inherit,
     Clean,
@@ -51,42 +50,70 @@ enum CalibreEnvMode {
 #[derive(Parser, Debug)]
 #[command(name = "calibre-updatr")]
 #[command(about = "Calibre bulk metadata updater + format embedder", long_about = None)]
-#[command(group(
-    clap::ArgGroup::new("library_source")
-        .required(true)
-        .args(["library", "library_url"]),
-))]
 struct Args {
-    #[arg(long, help = "Path to Calibre library")]
+    #[arg(long, default_value = "config.toml", help = "Path to config.toml")]
+    config: String,
+    #[arg(long, help = "Override: Path to Calibre library")]
     library: Option<String>,
-    #[arg(
-        long,
-        help = "Calibre Content Server URL to the library (use when Calibre is running)"
-    )]
+    #[arg(long, help = "Override: Calibre Content Server URL to the library")]
     library_url: Option<String>,
-    #[arg(
-        long,
-        default_value = None,
-        help = "Path to state file (default: <library>/.calibre_metadata_state.json or CWD for remote libraries)"
-    )]
-    state_path: Option<String>,
-    #[arg(
-        long,
-        default_value = "epub",
-        help = "Comma-separated Calibre formats to process (default: %(default)s)"
-    )]
-    formats: String,
-    #[arg(long, action = clap::ArgAction::SetTrue, help = "Show what would happen without modifying the library")]
+    #[arg(long, help = "Override: Calibre Content Server username")]
+    calibre_username: Option<String>,
+    #[arg(long, help = "Override: Calibre Content Server password")]
+    calibre_password: Option<String>,
+    #[arg(long, action = clap::ArgAction::SetTrue, help = "Override: dry run (no changes)")]
     dry_run: bool,
-    #[arg(
-        long,
-        value_enum,
-        default_value_t = CalibreEnvMode::Inherit,
-        help = "Environment handling for calibredb: inherit (default), clean, or override"
-    )]
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+struct Config {
+    log_level: String,
+    library: Option<String>,
+    library_url: Option<String>,
+    state_path: Option<String>,
+    formats: Vec<String>,
+    dry_run: bool,
     calibredb_env: CalibreEnvMode,
-    #[arg(long, action = clap::ArgAction::SetTrue, help = "Log environment info for calibredb troubleshooting")]
     debug_calibredb_env: bool,
+    headless_fetch: bool,
+    headless_env: HashMap<String, String>,
+    calibre_username: Option<String>,
+    calibre_password: Option<String>,
+    reprocess_on_metadata_change: bool,
+    min_score_to_skip_fetch: i32,
+    include_missing_language: bool,
+    english_codes: Vec<String>,
+    delay_between_fetches_seconds: f64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            log_level: "info".to_string(),
+            library: None,
+            library_url: None,
+            state_path: None,
+            formats: vec!["epub".to_string(), "pdf".to_string()],
+            dry_run: false,
+            calibredb_env: CalibreEnvMode::Inherit,
+            debug_calibredb_env: false,
+            headless_fetch: true,
+            headless_env: HashMap::from([
+                ("QT_QPA_PLATFORM".to_string(), "offscreen".to_string()),
+                ("QTWEBENGINE_DISABLE_SANDBOX".to_string(), "1".to_string()),
+                ("QTWEBENGINE_CHROMIUM_FLAGS".to_string(), "--no-sandbox".to_string()),
+                ("LIBGL_ALWAYS_SOFTWARE".to_string(), "1".to_string()),
+            ]),
+            calibre_username: None,
+            calibre_password: None,
+            reprocess_on_metadata_change: false,
+            min_score_to_skip_fetch: DEFAULT_MIN_SCORE_TO_SKIP_FETCH,
+            include_missing_language: true,
+            english_codes: DEFAULT_ENGLISH_CODES.iter().map(|s| s.to_string()).collect(),
+            delay_between_fetches_seconds: DEFAULT_DELAY_BETWEEN_FETCHES_SECONDS,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -133,11 +160,15 @@ struct Snapshot {
 struct Runner {
     calibredb_env_mode: CalibreEnvMode,
     debug_calibredb_env: bool,
+    headless_fetch: bool,
+    headless_env: HashMap<String, String>,
+    calibre_username: Option<String>,
+    calibre_password: Option<String>,
 }
 
-fn init_tracing() {
+fn init_tracing(default_level: &str) {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+        .unwrap_or_else(|_| EnvFilter::new(default_level));
     fmt()
         .with_env_filter(filter)
         .with_target(false)
@@ -179,6 +210,45 @@ fn normalize_library_spec(spec: &str) -> String {
     trimmed.to_string()
 }
 
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    match value {
+        Some(s) if s.trim().is_empty() => None,
+        Some(s) => Some(s),
+        None => None,
+    }
+}
+
+fn load_config(path: &Path) -> Result<Config> {
+    let contents = fs::read_to_string(path).with_context(|| {
+        format!(
+            "Failed to read config file {} (create one from config.toml)",
+            path.display()
+        )
+    })?;
+    let cfg: Config = toml::from_str(&contents)
+        .with_context(|| format!("Failed to parse config {}", path.display()))?;
+    Ok(cfg)
+}
+
+fn append_calibre_auth(
+    cmd: &mut Vec<String>,
+    lib: &str,
+    username: &Option<String>,
+    password: &Option<String>,
+) {
+    if !(lib.starts_with("http://") || lib.starts_with("https://")) {
+        return;
+    }
+    if let Some(user) = username {
+        cmd.push("--username".to_string());
+        cmd.push(user.clone());
+        if let Some(pass) = password {
+            cmd.push("--password".to_string());
+            cmd.push(pass.clone());
+        }
+    }
+}
+
 fn should_clean_env_key(key: &str) -> bool {
     key.starts_with("PYTHON")
         || key.starts_with("VIRTUAL_ENV")
@@ -205,6 +275,18 @@ impl Runner {
             for (k, v) in extra {
                 base_env.insert(k.clone(), v.clone());
             }
+        }
+
+        if cmd.get(0).map(|s| s == "fetch-ebook-metadata").unwrap_or(false)
+            && self.headless_fetch
+        {
+            for (k, v) in &self.headless_env {
+                base_env.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            debug!(
+                headless = true,
+                "[fetch-ebook-metadata] using headless Qt/WebEngine env"
+            );
         }
 
         let run_with_env = |env: &HashMap<String, String>| -> Result<CmdResult> {
@@ -385,13 +467,17 @@ fn normalize_languages(val: &Value) -> Vec<String> {
     }
 }
 
-fn is_english_or_missing(langs: &[String]) -> bool {
+fn is_english_or_missing(
+    langs: &[String],
+    include_missing_language: bool,
+    english_codes: &[String],
+) -> bool {
     if langs.is_empty() {
-        return INCLUDE_MISSING_LANGUAGE;
+        return include_missing_language;
     }
     for x in langs {
         let x2 = x.replace('_', "-").to_lowercase();
-        if ENGLISH_CODES.contains(&x2.as_str()) {
+        if english_codes.iter().any(|c| c == &x2) {
             return true;
         }
         if x2.starts_with("en-") {
@@ -628,6 +714,8 @@ fn put_book_state(state: &mut StateFile, book_id: i64, bs: BookState) {
 fn list_candidate_books(
     runner: &Runner,
     lib: &str,
+    include_missing_language: bool,
+    english_codes: &[String],
     target_formats: &BTreeMap<String, ()>,
 ) -> Result<Vec<Value>> {
     let fields = [
@@ -656,17 +744,25 @@ fn list_candidate_books(
         .collect::<Vec<_>>()
         .join(" or ");
 
-    let cmd = vec![
+    let mut cmd = vec![
         "calibredb".to_string(),
         "--with-library".to_string(),
         lib.to_string(),
+    ];
+    append_calibre_auth(
+        &mut cmd,
+        lib,
+        &runner.calibre_username,
+        &runner.calibre_password,
+    );
+    cmd.extend([
         "list".to_string(),
         "--for-machine".to_string(),
         "--fields".to_string(),
         fields,
         "--search".to_string(),
         search_expr,
-    ];
+    ]);
 
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
@@ -712,7 +808,7 @@ Example: --library-url \"http://localhost:8081/#en_nonfiction\""
             continue;
         }
         let langs = normalize_languages(b.get("languages").unwrap_or(&Value::Null));
-        if !is_english_or_missing(&langs) {
+        if !is_english_or_missing(&langs, include_missing_language, english_codes) {
             continue;
         }
         out.push(b.clone());
@@ -801,14 +897,22 @@ fn apply_opf_to_calibre_db(
     book_id: i64,
     opf_path: &Path,
 ) -> Result<(bool, String)> {
-    let cmd = vec![
+    let mut cmd = vec![
         "calibredb".to_string(),
         "--with-library".to_string(),
         lib.to_string(),
+    ];
+    append_calibre_auth(
+        &mut cmd,
+        lib,
+        &runner.calibre_username,
+        &runner.calibre_password,
+    );
+    cmd.extend([
         "set_metadata".to_string(),
         book_id.to_string(),
         opf_path.display().to_string(),
-    ];
+    ]);
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
         let mut msg = format!("set_metadata failed rc={}", cp.status_code);
@@ -833,15 +937,23 @@ fn apply_cover_to_calibre_db(
         return Ok((true, "no cover downloaded".to_string()));
     }
 
-    let cmd = vec![
+    let mut cmd = vec![
         "calibredb".to_string(),
         "--with-library".to_string(),
         lib.to_string(),
+    ];
+    append_calibre_auth(
+        &mut cmd,
+        lib,
+        &runner.calibre_username,
+        &runner.calibre_password,
+    );
+    cmd.extend([
         "set_metadata".to_string(),
         book_id.to_string(),
         "--field".to_string(),
         format!("cover:{}", cover_path.display()),
-    ];
+    ]);
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
         let mut msg = format!("cover set failed rc={}", cp.status_code);
@@ -870,15 +982,23 @@ fn embed_metadata_into_formats(
         .map(|f| f.to_uppercase())
         .collect::<Vec<_>>()
         .join(",");
-    let cmd = vec![
+    let mut cmd = vec![
         "calibredb".to_string(),
         "--with-library".to_string(),
         lib.to_string(),
+    ];
+    append_calibre_auth(
+        &mut cmd,
+        lib,
+        &runner.calibre_username,
+        &runner.calibre_password,
+    );
+    cmd.extend([
         "embed_metadata".to_string(),
         "--only-formats".to_string(),
         fmt_arg,
         book_id.to_string(),
-    ];
+    ]);
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
         let mut msg = format!("embed_metadata failed rc={}", cp.status_code);
@@ -910,17 +1030,25 @@ fn refresh_one_book(runner: &Runner, lib: &str, book_id: i64) -> Result<Option<V
         "last_modified",
     ]
     .join(",");
-    let cmd = vec![
+    let mut cmd = vec![
         "calibredb".to_string(),
         "--with-library".to_string(),
         lib.to_string(),
+    ];
+    append_calibre_auth(
+        &mut cmd,
+        lib,
+        &runner.calibre_username,
+        &runner.calibre_password,
+    );
+    cmd.extend([
         "list".to_string(),
         "--for-machine".to_string(),
         "--fields".to_string(),
         fields,
         "--search".to_string(),
         format!("id:{book_id}"),
-    ];
+    ]);
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 || cp.stdout.trim().is_empty() {
         return Ok(None);
@@ -943,6 +1071,9 @@ fn process_one_book(
     workdir: &Path,
     lib: &str,
     target_formats: &BTreeMap<String, ()>,
+    reprocess_on_metadata_change: bool,
+    min_score_to_skip_fetch: i32,
+    delay_between_fetches_seconds: f64,
     dry_run: bool,
 ) -> Result<String> {
     let book_id = book
@@ -962,9 +1093,9 @@ fn process_one_book(
     let prev = get_book_state(state, book_id);
     if let Some(prev_state) = &prev {
         if ["done", "skipped_good_enough", "embedded_only"].contains(&prev_state.status.as_str())
-            && (!REPROCESS_ON_METADATA_CHANGE || prev_state.last_hash == h)
+            && (!reprocess_on_metadata_change || prev_state.last_hash == h)
         {
-            let reason = if !REPROCESS_ON_METADATA_CHANGE {
+            let reason = if !reprocess_on_metadata_change {
                 "already processed"
             } else {
                 "already processed for current metadata hash"
@@ -975,7 +1106,8 @@ fn process_one_book(
     }
 
     let (score, reasons) = score_good_enough(&snap);
-    let good_enough = score >= MIN_SCORE_TO_SKIP_FETCH && !snap.title.is_empty() && !snap.authors.is_empty();
+    let good_enough =
+        score >= min_score_to_skip_fetch && !snap.title.is_empty() && !snap.authors.is_empty();
 
     if good_enough {
         info!(
@@ -1069,8 +1201,8 @@ fn process_one_book(
         return Ok("failed".to_string());
     }
 
-    if DELAY_BETWEEN_FETCHES_SECONDS > 0.0 {
-        std::thread::sleep(Duration::from_secs_f64(DELAY_BETWEEN_FETCHES_SECONDS));
+    if delay_between_fetches_seconds > 0.0 {
+        std::thread::sleep(Duration::from_secs_f64(delay_between_fetches_seconds));
     }
 
     let (ok_set, msg_set) = apply_opf_to_calibre_db(runner, lib, book_id, &opf_path)?;
@@ -1131,19 +1263,45 @@ fn process_one_book(
 }
 
 fn main() -> Result<()> {
-    init_tracing();
     let args = Args::parse();
     require_tool("calibredb")?;
     require_tool("fetch-ebook-metadata")?;
 
-    let lib_raw = args
+    let config_path = PathBuf::from(&args.config);
+    let mut config = load_config(&config_path)?;
+    config.library = normalize_optional_string(config.library);
+    config.library_url = normalize_optional_string(config.library_url);
+    config.state_path = normalize_optional_string(config.state_path);
+    config.calibre_username = normalize_optional_string(config.calibre_username);
+    config.calibre_password = normalize_optional_string(config.calibre_password);
+
+    if args.library.is_some() {
+        config.library = args.library.clone();
+        config.library_url = None;
+    }
+    if args.library_url.is_some() {
+        config.library_url = args.library_url.clone();
+    }
+    if args.calibre_username.is_some() {
+        config.calibre_username = args.calibre_username.clone();
+    }
+    if args.calibre_password.is_some() {
+        config.calibre_password = args.calibre_password.clone();
+    }
+    if args.dry_run {
+        config.dry_run = true;
+    }
+
+    init_tracing(&config.log_level);
+
+    let lib_raw = config
         .library_url
         .clone()
-        .or(args.library.clone())
-        .ok_or_else(|| anyhow::anyhow!("Missing --library or --library-url"))?;
+        .or(config.library.clone())
+        .ok_or_else(|| anyhow::anyhow!("Missing library or library_url in config"))?;
     let lib = normalize_library_spec(&lib_raw);
     let is_remote = lib.starts_with("http://") || lib.starts_with("https://");
-    let state_path = if let Some(p) = args.state_path.clone() {
+    let state_path = if let Some(p) = config.state_path.clone() {
         PathBuf::from(p)
     } else if is_remote {
         std::env::current_dir()?.join(".calibre_metadata_state.json")
@@ -1155,33 +1313,49 @@ fn main() -> Result<()> {
         anyhow::bail!("Library path does not exist or is not a directory: {lib}");
     }
 
-    let target_formats: BTreeMap<String, ()> = args
+    let target_formats: BTreeMap<String, ()> = config
         .formats
-        .split(',')
+        .iter()
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty())
         .map(|s| (s, ()))
         .collect();
     if target_formats.is_empty() {
-        anyhow::bail!("No formats specified. Use --formats epub,pdf");
+        anyhow::bail!("No formats specified. Set formats in config.toml");
     }
 
     let runner = Runner {
-        calibredb_env_mode: args.calibredb_env,
-        debug_calibredb_env: args.debug_calibredb_env,
+        calibredb_env_mode: config.calibredb_env,
+        debug_calibredb_env: config.debug_calibredb_env,
+        headless_fetch: config.headless_fetch,
+        headless_env: config.headless_env.clone(),
+        calibre_username: config.calibre_username.clone(),
+        calibre_password: config.calibre_password.clone(),
     };
 
     let mut state = load_state(&state_path)?;
-    let books = list_candidate_books(&runner, &lib, &target_formats)?;
+    let books = list_candidate_books(
+        &runner,
+        &lib,
+        config.include_missing_language,
+        &config.english_codes,
+        &target_formats,
+    )?;
 
     info!(library = %lib, "[info] library");
+    if lib.starts_with("http://") || lib.starts_with("https://") {
+        info!(
+            auth = %config.calibre_username.as_deref().unwrap_or("<none>"),
+            "[info] calibre content server auth"
+        );
+    }
     info!(state = %state_path.display(), "[info] state");
     info!(
         candidates = books.len(),
         formats = %target_formats.keys().cloned().collect::<Vec<_>>().join(","),
         "[info] candidates (English-or-missing-language)"
     );
-    if args.dry_run {
+    if config.dry_run {
         info!("[info] dry-run enabled (no changes will be written)");
     }
 
@@ -1204,10 +1378,11 @@ fn main() -> Result<()> {
             if let Some(prev_state) = prev {
                 if ["done", "skipped_good_enough", "embedded_only"]
                     .contains(&prev_state.status.as_str())
-                    && (!REPROCESS_ON_METADATA_CHANGE || prev_state.last_hash == before_hash)
+                    && (!config.reprocess_on_metadata_change
+                        || prev_state.last_hash == before_hash)
                 {
                     skipped += 1;
-                    let reason = if !REPROCESS_ON_METADATA_CHANGE {
+                    let reason = if !config.reprocess_on_metadata_change {
                         "already processed"
                     } else {
                         "already processed for current metadata hash"
@@ -1224,10 +1399,13 @@ fn main() -> Result<()> {
                 workdir.path(),
                 &lib,
                 &target_formats,
-                args.dry_run,
+                config.reprocess_on_metadata_change,
+                config.min_score_to_skip_fetch,
+                config.delay_between_fetches_seconds,
+                config.dry_run,
             )?;
 
-            if args.dry_run {
+            if config.dry_run {
                 if ["done", "updated", "embedded_only"].contains(&action.as_str()) {
                     ok += 1;
                 } else if action == "failed" {
@@ -1250,7 +1428,7 @@ fn main() -> Result<()> {
 
         if let Err(err) = result {
             fail += 1;
-            if args.dry_run {
+            if config.dry_run {
                 error!(id = book_id, title = %title, error = %err, "[fail] exception");
                 continue;
             }
@@ -1268,7 +1446,7 @@ fn main() -> Result<()> {
             put_book_state(&mut state, book_id, bs);
         }
 
-        if !args.dry_run {
+        if !config.dry_run {
             save_state(&state_path, &mut state)?;
         }
     }
