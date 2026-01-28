@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use tracing::{debug, info, warn};
+use wait_timeout::ChildExt;
 
 const CALIBRE_ENVS: &[&[(&str, &str)]] = &[
     &[
@@ -32,6 +34,7 @@ pub struct CmdResult {
     pub status_code: i32,
     pub stdout: String,
     pub stderr: String,
+    pub timed_out: bool,
 }
 
 #[derive(Debug)]
@@ -77,6 +80,16 @@ impl Runner {
         capture: bool,
         extra_env: Option<&HashMap<String, String>>,
     ) -> Result<CmdResult> {
+        self.run_with_timeout(cmd, capture, extra_env, None)
+    }
+
+    pub fn run_with_timeout(
+        &self,
+        cmd: &[String],
+        capture: bool,
+        extra_env: Option<&HashMap<String, String>>,
+        timeout: Option<Duration>,
+    ) -> Result<CmdResult> {
         if cmd.is_empty() {
             anyhow::bail!("empty command");
         }
@@ -109,6 +122,33 @@ impl Runner {
             for (k, v) in env {
                 command.env(k, v);
             }
+            if let Some(limit) = timeout {
+                let mut child = command.spawn().with_context(|| {
+                    format!("Failed to run command: {}", cmd.join(" "))
+                })?;
+                match child.wait_timeout(limit)? {
+                    Some(_) => {
+                        let output = child.wait_with_output()?;
+                        return Ok(CmdResult {
+                            status_code: output.status.code().unwrap_or(1),
+                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                            timed_out: false,
+                        });
+                    }
+                    None => {
+                        let _ = child.kill();
+                        let output = child.wait_with_output()?;
+                        return Ok(CmdResult {
+                            status_code: 124,
+                            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                            timed_out: true,
+                        });
+                    }
+                }
+            }
+
             let output = command.output().with_context(|| {
                 format!("Failed to run command: {}", cmd.join(" "))
             })?;
@@ -116,6 +156,7 @@ impl Runner {
                 status_code: output.status.code().unwrap_or(1),
                 stdout: String::from_utf8_lossy(&output.stdout).to_string(),
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                timed_out: false,
             })
         };
 

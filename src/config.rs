@@ -97,6 +97,7 @@ pub struct ContentServerConfig {
 pub struct FetchConfig {
     pub headless: bool,
     pub headless_env: HashMap<String, String>,
+    pub timeout_seconds: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -203,6 +204,7 @@ impl Default for FetchConfig {
                 ("QT_OPENGL".to_string(), "software".to_string()),
                 ("LIBGL_ALWAYS_SOFTWARE".to_string(), "1".to_string()),
             ]),
+            timeout_seconds: 45,
         }
     }
 }

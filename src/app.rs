@@ -13,7 +13,7 @@ use clap::Parser;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 fn require_tool(name: &str) -> Result<()> {
     which::which(name).with_context(|| format!("Missing required tool on PATH: {name}"))?;
@@ -30,6 +30,8 @@ fn process_one_book(
     reprocess_on_metadata_change: bool,
     scoring: &crate::config::ScoringConfig,
     delay_between_fetches_seconds: f64,
+    fetch_timeout_seconds: u64,
+    state_path: &Path,
     dry_run: bool,
 ) -> Result<String> {
     let book_id = book
@@ -48,7 +50,8 @@ fn process_one_book(
 
     let prev = get_book_state(state, book_id);
     if let Some(prev_state) = &prev {
-        if ["done", "skipped_good_enough", "embedded_only"].contains(&prev_state.status.as_str())
+        if ["done", "skipped_good_enough", "embedded_only", "failed_permanent"]
+            .contains(&prev_state.status.as_str())
             && (!reprocess_on_metadata_change || prev_state.last_hash == h)
         {
             let reason = if !reprocess_on_metadata_change {
@@ -65,6 +68,17 @@ fn process_one_book(
     let good_enough = score >= scoring.min_score_to_skip_fetch
         && (!scoring.require_title || !snap.title.is_empty())
         && (!scoring.require_authors || !snap.authors.is_empty());
+
+    let started = BookState {
+        status: "started".to_string(),
+        last_hash: h.clone(),
+        last_attempt_utc: now_iso(),
+        last_ok_utc: prev.as_ref().and_then(|p| p.last_ok_utc.clone()),
+        message: Some("started".to_string()),
+        fail_count: prev.as_ref().map(|p| p.fail_count).unwrap_or(0),
+    };
+    put_book_state(state, book_id, started);
+    save_state(state_path, state)?;
 
     if good_enough {
         info!(
@@ -106,6 +120,7 @@ fn process_one_book(
             },
         };
         put_book_state(state, book_id, bs);
+        save_state(state_path, state)?;
         if ok_embed {
             info!(id = book_id, title = %title, "[done] good enough; embedded");
         } else {
@@ -135,10 +150,21 @@ fn process_one_book(
         return Ok("updated".to_string());
     }
 
-    let (ok_fetch, msg_fetch) = fetch_metadata_to_opf_and_cover(runner, book, &opf_path, &cover_path)?;
+    let (ok_fetch, msg_fetch) = fetch_metadata_to_opf_and_cover(
+        runner,
+        book,
+        &opf_path,
+        &cover_path,
+        fetch_timeout_seconds,
+    )?;
     if !ok_fetch {
+        let status = if msg_fetch.contains("timed out") {
+            "failed_permanent"
+        } else {
+            "failed"
+        };
         let bs = BookState {
-            status: "failed".to_string(),
+            status: status.to_string(),
             last_hash: h,
             last_attempt_utc: now_iso(),
             last_ok_utc: prev.as_ref().and_then(|p| p.last_ok_utc.clone()),
@@ -146,6 +172,7 @@ fn process_one_book(
             fail_count: prev.as_ref().map(|p| p.fail_count + 1).unwrap_or(1),
         };
         put_book_state(state, book_id, bs);
+        save_state(state_path, state)?;
         warn!(id = book_id, title = %title, error = %msg_fetch, "[skip] fetch");
         return Ok("failed".to_string());
     }
@@ -165,6 +192,7 @@ fn process_one_book(
             fail_count: prev.as_ref().map(|p| p.fail_count + 1).unwrap_or(1),
         };
         put_book_state(state, book_id, bs);
+        save_state(state_path, state)?;
         warn!(id = book_id, title = %title, error = %msg_set, "[skip] set_metadata");
         return Ok("failed".to_string());
     }
@@ -186,6 +214,7 @@ fn process_one_book(
             fail_count: prev.as_ref().map(|p| p.fail_count + 1).unwrap_or(1),
         };
         put_book_state(state, book_id, bs);
+        save_state(state_path, state)?;
         warn!(id = book_id, title = %title, error = %msg_embed, "[skip] embed");
         return Ok("failed".to_string());
     }
@@ -207,6 +236,7 @@ fn process_one_book(
         fail_count: 0,
     };
     put_book_state(state, book_id, bs);
+    save_state(state_path, state)?;
     info!(id = book_id, title = %title, "[done] updated + embedded");
     Ok("done".to_string())
 }
@@ -322,10 +352,11 @@ pub fn run() -> Result<()> {
             .trim()
             .to_string();
         let result = (|| -> Result<String> {
+            debug!(id = book_id, title = %title, "[book] start");
             let prev = get_book_state(&state, book_id);
             let before_hash = snapshot_hash(&metadata_snapshot(&b))?;
             if let Some(prev_state) = prev {
-                if ["done", "skipped_good_enough", "embedded_only"]
+                if ["done", "skipped_good_enough", "embedded_only", "failed_permanent"]
                     .contains(&prev_state.status.as_str())
                     && (!config.policy.reprocess_on_metadata_change
                         || prev_state.last_hash == before_hash)
@@ -351,6 +382,8 @@ pub fn run() -> Result<()> {
                 config.policy.reprocess_on_metadata_change,
                 &config.scoring,
                 config.policy.delay_between_fetches_seconds,
+                config.fetch.timeout_seconds,
+                &state_path,
                 config.policy.dry_run,
             )?;
 

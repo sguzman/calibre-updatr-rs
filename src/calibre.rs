@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
-use tracing::error;
+use tracing::{error, info};
 
 pub fn append_calibre_auth(
     cmd: &mut Vec<String>,
@@ -137,6 +137,7 @@ pub fn fetch_metadata_to_opf_and_cover(
     book: &Value,
     opf_path: &Path,
     cover_path: &Path,
+    timeout_seconds: u64,
 ) -> Result<(bool, String)> {
     let title = book
         .get("title")
@@ -182,7 +183,7 @@ pub fn fetch_metadata_to_opf_and_cover(
         }
         if !title.is_empty() {
             cmd.push("--title".to_string());
-            cmd.push(title);
+            cmd.push(title.clone());
         }
         if !authors.is_empty() {
             cmd.push("--authors".to_string());
@@ -190,7 +191,11 @@ pub fn fetch_metadata_to_opf_and_cover(
         }
     }
 
-    let cp = runner.run(&cmd, true, None)?;
+    info!(timeout_seconds, title = %title, "[fetch] starting fetch-ebook-metadata");
+    let cp = runner.run_with_timeout(&cmd, true, None, Some(std::time::Duration::from_secs(timeout_seconds)))?;
+    if cp.timed_out {
+        return Ok((false, format!("fetch-ebook-metadata timed out after {}s", timeout_seconds)));
+    }
     if cp.status_code != 0 {
         let mut msg = format!("fetch-ebook-metadata failed rc={}", cp.status_code);
         if !cp.stderr.trim().is_empty() {
@@ -226,6 +231,7 @@ pub fn apply_opf_to_calibre_db(
         book_id.to_string(),
         opf_path.display().to_string(),
     ]);
+    info!(book_id, "[apply] set_metadata");
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
         let mut msg = format!("set_metadata failed rc={}", cp.status_code);
@@ -264,6 +270,7 @@ pub fn apply_cover_to_calibre_db(
         "--field".to_string(),
         format!("cover:{}", cover_path.display()),
     ]);
+    info!(book_id, "[apply] cover");
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
         let mut msg = format!("cover set failed rc={}", cp.status_code);
@@ -306,6 +313,7 @@ pub fn embed_metadata_into_formats(
         fmt_arg,
         book_id.to_string(),
     ]);
+    info!(book_id, "[embed] embed_metadata");
     let cp = runner.run(&cmd, true, None)?;
     if cp.status_code != 0 {
         let mut msg = format!("embed_metadata failed rc={}", cp.status_code);
