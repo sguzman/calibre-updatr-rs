@@ -33,6 +33,14 @@ Usage
 -----
 Requires `calibredb` and `fetch-ebook-metadata` on your PATH.
 
+Logging
+-------
+Uses `tracing` + `tracing-subscriber`. Control verbosity via `RUST_LOG`:
+```bash
+RUST_LOG=debug cargo run -- --library "/path/to/Calibre Library"
+RUST_LOG=info cargo run -- --library-url "http://localhost:8081/#en_nonfiction"
+```
+
 Run against a specific library path:
 ```bash
 cargo run -- --library "/path/to/Calibre Library"

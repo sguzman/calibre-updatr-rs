@@ -11,6 +11,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::{fmt, EnvFilter};
 
 const ENGLISH_CODES: &[&str] = &["en", "eng", "en-us", "en-gb"];
 const INCLUDE_MISSING_LANGUAGE: bool = true;
@@ -133,8 +135,14 @@ struct Runner {
     debug_calibredb_env: bool,
 }
 
-fn log(msg: &str) {
-    eprintln!("{msg}");
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_level(true)
+        .init();
 }
 
 fn now_iso() -> String {
@@ -191,7 +199,7 @@ impl Runner {
         if cmd.is_empty() {
             anyhow::bail!("empty command");
         }
-        log(&format!("[cmd] {}", cmd.join(" ")));
+        debug!(command = %cmd.join(" "), "[cmd]");
         let mut base_env: HashMap<String, String> = std::env::vars().collect();
         if let Some(extra) = extra_env {
             for (k, v) in extra {
@@ -238,16 +246,16 @@ impl Runner {
                     "PYENV_VERSION",
                     "PATH",
                 ];
-                log(&format!(
-                    "[calibredb debug] current_exe={}",
-                    std::env::current_exe()
+                debug!(
+                    current_exe = %std::env::current_exe()
                         .ok()
                         .and_then(|p| p.to_str().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "<unknown>".to_string())
-                ));
+                        .unwrap_or_else(|| "<unknown>".to_string()),
+                    "[calibredb debug]"
+                );
                 for k in keys {
                     if let Some(val) = base_env.get(k) {
-                        log(&format!("[calibredb debug] {k}={val}"));
+                        debug!(key = %k, value = %val, "[calibredb debug]");
                     }
                 }
             }
@@ -275,16 +283,16 @@ impl Runner {
                         }
                     }
                     if !last.stderr.trim().is_empty() {
-                        log(&format!(
-                            "[calibredb stderr] {}",
-                            truncate(&trim_if_present(&last.stderr), 2000)
-                        ));
+                        warn!(
+                            stderr = %truncate(&trim_if_present(&last.stderr), 2000),
+                            "[calibredb stderr]"
+                        );
                     }
                     if !last.stdout.trim().is_empty() {
-                        log(&format!(
-                            "[calibredb stdout] {}",
-                            truncate(&trim_if_present(&last.stdout), 2000)
-                        ));
+                        warn!(
+                            stdout = %truncate(&trim_if_present(&last.stdout), 2000),
+                            "[calibredb stdout]"
+                        );
                     }
                     return Ok(last);
                 }
@@ -294,29 +302,29 @@ impl Runner {
                         return Ok(first);
                     }
                     if !first.stderr.trim().is_empty() {
-                        log(&format!(
-                            "[calibredb stderr] {}",
-                            truncate(&trim_if_present(&first.stderr), 2000)
-                        ));
+                        warn!(
+                            stderr = %truncate(&trim_if_present(&first.stderr), 2000),
+                            "[calibredb stderr]"
+                        );
                     }
                     if !first.stdout.trim().is_empty() {
-                        log(&format!(
-                            "[calibredb stdout] {}",
-                            truncate(&trim_if_present(&first.stdout), 2000)
-                        ));
+                        warn!(
+                            stdout = %truncate(&trim_if_present(&first.stdout), 2000),
+                            "[calibredb stdout]"
+                        );
                     }
                     if first.stderr.contains("No module named 'msgpack'") {
                         base_env.retain(|k, _| !should_clean_env_key(k));
                         let retry = run_with_env(&base_env)?;
                         if retry.status_code == 0 {
-                            log("[info] calibredb succeeded after cleaning env vars");
+                            info!("[calibredb] succeeded after cleaning env vars");
                             return Ok(retry);
                         }
                         if !retry.stderr.trim().is_empty() {
-                            log(&format!(
-                                "[calibredb retry stderr] {}",
-                                truncate(&trim_if_present(&retry.stderr), 2000)
-                            ));
+                            warn!(
+                                stderr = %truncate(&trim_if_present(&retry.stderr), 2000),
+                                "[calibredb retry stderr]"
+                            );
                         }
                         return Ok(retry);
                     }
@@ -681,12 +689,9 @@ Example: --library-url \"http://localhost:8081/#en_nonfiction\""
         if stderr.contains("no books matching the search expression") {
             return Ok(vec![]);
         }
-        log(&format!(
-            "[fatal] calibredb list failed rc={}",
-            cp.status_code
-        ));
+        error!(rc = cp.status_code, "[fatal] calibredb list failed");
         if !cp.stderr.trim().is_empty() {
-            log(&cp.stderr[..cp.stderr.len().min(500)]);
+            error!(stderr = %truncate(&cp.stderr, 500), "[fatal] calibredb list stderr");
         }
         anyhow::bail!("calibredb list failed");
     }
@@ -964,10 +969,7 @@ fn process_one_book(
             } else {
                 "already processed for current metadata hash"
             };
-            log(&format!(
-                "[skip] id={} title={:?} ({})",
-                book_id, title, reason
-            ));
+            info!(id = book_id, title = %title, reason = %reason, "[skip]");
             return Ok("skipped".to_string());
         }
     }
@@ -976,17 +978,19 @@ fn process_one_book(
     let good_enough = score >= MIN_SCORE_TO_SKIP_FETCH && !snap.title.is_empty() && !snap.authors.is_empty();
 
     if good_enough {
-        log(&format!(
-            "[ok?] id={} title={:?} score={} -> good enough; embedding only",
-            book_id, title, score
-        ));
+        info!(
+            id = book_id,
+            title = %title,
+            score,
+            "[good-enough] embedding only"
+        );
         if dry_run {
-            log(&format!(
-                "[dry-run] id={} title={:?} would embed metadata into formats: {}",
-                book_id,
-                title,
-                target_formats.keys().cloned().collect::<Vec<_>>().join(",")
-            ));
+            info!(
+                id = book_id,
+                title = %title,
+                formats = %target_formats.keys().cloned().collect::<Vec<_>>().join(","),
+                "[dry-run] embed metadata"
+            );
             return Ok("embedded_only".to_string());
         }
 
@@ -1018,15 +1022,9 @@ fn process_one_book(
         };
         put_book_state(state, book_id, bs);
         if ok_embed {
-            log(&format!(
-                "[done] id={} title={:?} (good enough; embedded)",
-                book_id, title
-            ));
+            info!(id = book_id, title = %title, "[done] good enough; embedded");
         } else {
-            log(&format!(
-                "[fail] id={} title={:?} ({})",
-                book_id, title, msg_embed
-            ));
+            warn!(id = book_id, title = %title, error = %msg_embed, "[fail] embed");
         }
         return Ok(if ok_embed {
             "done".to_string()
@@ -1035,24 +1033,24 @@ fn process_one_book(
         });
     }
 
-    log(&format!(
-        "[work] id={} title={:?} score={} (not good enough; will fetch). missing: {}",
-        book_id,
-        title,
+    info!(
+        id = book_id,
+        title = %title,
         score,
-        reasons.join(", ")
-    ));
+        missing = %reasons.join(", "),
+        "[work] fetch metadata"
+    );
 
     let opf_path = workdir.join(format!("{book_id}.opf"));
     let cover_path = workdir.join(format!("{book_id}.cover.jpg"));
 
     if dry_run {
-        log(&format!(
-            "[dry-run] id={} title={:?} would fetch metadata -> apply -> embed (formats: {})",
-            book_id,
-            title,
-            target_formats.keys().cloned().collect::<Vec<_>>().join(",")
-        ));
+        info!(
+            id = book_id,
+            title = %title,
+            formats = %target_formats.keys().cloned().collect::<Vec<_>>().join(","),
+            "[dry-run] fetch -> apply -> embed"
+        );
         return Ok("updated".to_string());
     }
 
@@ -1067,10 +1065,7 @@ fn process_one_book(
             fail_count: prev.as_ref().map(|p| p.fail_count + 1).unwrap_or(1),
         };
         put_book_state(state, book_id, bs);
-        log(&format!(
-            "[skip] id={} title={:?} ({})",
-            book_id, title, msg_fetch
-        ));
+        warn!(id = book_id, title = %title, error = %msg_fetch, "[skip] fetch");
         return Ok("failed".to_string());
     }
 
@@ -1089,19 +1084,13 @@ fn process_one_book(
             fail_count: prev.as_ref().map(|p| p.fail_count + 1).unwrap_or(1),
         };
         put_book_state(state, book_id, bs);
-        log(&format!(
-            "[skip] id={} title={:?} ({})",
-            book_id, title, msg_set
-        ));
+        warn!(id = book_id, title = %title, error = %msg_set, "[skip] set_metadata");
         return Ok("failed".to_string());
     }
 
     let (ok_cov, msg_cov) = apply_cover_to_calibre_db(runner, lib, book_id, &cover_path)?;
     if !ok_cov {
-        log(&format!(
-            "[warn] id={} title={:?} ({})",
-            book_id, title, msg_cov
-        ));
+        warn!(id = book_id, title = %title, error = %msg_cov, "[warn] cover");
     }
 
     let (ok_embed, msg_embed) =
@@ -1116,10 +1105,7 @@ fn process_one_book(
             fail_count: prev.as_ref().map(|p| p.fail_count + 1).unwrap_or(1),
         };
         put_book_state(state, book_id, bs);
-        log(&format!(
-            "[skip] id={} title={:?} ({})",
-            book_id, title, msg_embed
-        ));
+        warn!(id = book_id, title = %title, error = %msg_embed, "[skip] embed");
         return Ok("failed".to_string());
     }
 
@@ -1140,14 +1126,12 @@ fn process_one_book(
         fail_count: 0,
     };
     put_book_state(state, book_id, bs);
-    log(&format!(
-        "[done] id={} title={:?} (updated + embedded)",
-        book_id, title
-    ));
+    info!(id = book_id, title = %title, "[done] updated + embedded");
     Ok("done".to_string())
 }
 
 fn main() -> Result<()> {
+    init_tracing();
     let args = Args::parse();
     require_tool("calibredb")?;
     require_tool("fetch-ebook-metadata")?;
@@ -1190,15 +1174,15 @@ fn main() -> Result<()> {
     let mut state = load_state(&state_path)?;
     let books = list_candidate_books(&runner, &lib, &target_formats)?;
 
-    log(&format!("[info] library={}", lib));
-    log(&format!("[info] state={}", state_path.display()));
-    log(&format!(
-        "[info] candidates={} (formats={} + English-or-missing-language)",
-        books.len(),
-        target_formats.keys().cloned().collect::<Vec<_>>().join(",")
-    ));
+    info!(library = %lib, "[info] library");
+    info!(state = %state_path.display(), "[info] state");
+    info!(
+        candidates = books.len(),
+        formats = %target_formats.keys().cloned().collect::<Vec<_>>().join(","),
+        "[info] candidates (English-or-missing-language)"
+    );
     if args.dry_run {
-        log("[info] dry-run enabled (no changes will be written)");
+        info!("[info] dry-run enabled (no changes will be written)");
     }
 
     let mut ok = 0;
@@ -1228,10 +1212,7 @@ fn main() -> Result<()> {
                     } else {
                         "already processed for current metadata hash"
                     };
-                    log(&format!(
-                        "[skip] id={} title={:?} ({})",
-                        book_id, title, reason
-                    ));
+                    info!(id = book_id, title = %title, reason = %reason, "[skip]");
                     return Ok("skipped".to_string());
                 }
             }
@@ -1270,10 +1251,7 @@ fn main() -> Result<()> {
         if let Err(err) = result {
             fail += 1;
             if args.dry_run {
-                log(&format!(
-                    "[fail] id={} title={:?} (exception: {})",
-                    book_id, title, err
-                ));
+                error!(id = book_id, title = %title, error = %err, "[fail] exception");
                 continue;
             }
             let snap = metadata_snapshot(&b);
@@ -1295,6 +1273,6 @@ fn main() -> Result<()> {
         }
     }
 
-    log(&format!("[summary] done_ok={} done_failed={} skipped={}", ok, fail, skipped));
+    info!(done_ok = ok, done_failed = fail, skipped, "[summary]");
     Ok(())
 }
