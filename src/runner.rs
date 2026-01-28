@@ -2,8 +2,11 @@ use crate::config::CalibreEnvMode;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use wait_timeout::ChildExt;
@@ -73,6 +76,16 @@ fn should_clean_env_key(key: &str) -> bool {
         || key.starts_with("PYENV")
 }
 
+fn base_env_with_extra(extra_env: Option<&HashMap<String, String>>) -> HashMap<String, String> {
+    let mut base_env: HashMap<String, String> = std::env::vars().collect();
+    if let Some(extra) = extra_env {
+        for (k, v) in extra {
+            base_env.insert(k.clone(), v.clone());
+        }
+    }
+    base_env
+}
+
 impl Runner {
     pub fn run(
         &self,
@@ -95,12 +108,7 @@ impl Runner {
             anyhow::bail!("empty command");
         }
         debug!(command = %cmd.join(" "), "[cmd]");
-        let mut base_env: HashMap<String, String> = std::env::vars().collect();
-        if let Some(extra) = extra_env {
-            for (k, v) in extra {
-                base_env.insert(k.clone(), v.clone());
-            }
-        }
+        let mut base_env = base_env_with_extra(extra_env);
 
         if cmd.get(0).map(|s| s == "fetch-ebook-metadata").unwrap_or(false)
             && self.headless_fetch
@@ -112,7 +120,6 @@ impl Runner {
         }
 
         let run_with_env = |env: &HashMap<String, String>| -> Result<CmdResult> {
-            let start = Instant::now();
             let mut command = Command::new(&cmd[0]);
             for arg in &cmd[1..] {
                 command.arg(arg);
@@ -129,6 +136,7 @@ impl Runner {
                     format!("Failed to run command: {}", cmd.join(" "))
                 })?;
                 let tick = heartbeat.unwrap_or(Duration::from_secs(0));
+                let start = Instant::now();
                 let mut last_beat = Instant::now();
                 loop {
                     let wait_dur = if tick.as_secs() == 0 { limit } else { Duration::from_secs(1) };
@@ -278,5 +286,128 @@ impl Runner {
         }
 
         run_with_env(&base_env)
+    }
+
+    pub fn run_fetch_streaming(
+        &self,
+        cmd: &[String],
+        timeout: Duration,
+        heartbeat: Duration,
+    ) -> Result<CmdResult> {
+        if cmd.is_empty() {
+            anyhow::bail!("empty command");
+        }
+        debug!(command = %cmd.join(" "), "[cmd]");
+        let mut env = base_env_with_extra(None);
+        if self.headless_fetch {
+            for (k, v) in &self.headless_env {
+                env.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            debug!(headless = true, "[fetch-ebook-metadata] using headless Qt/WebEngine env");
+        }
+
+        let mut command = Command::new(&cmd[0]);
+        for arg in &cmd[1..] {
+            command.arg(arg);
+        }
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        command.env_clear();
+        for (k, v) in env {
+            command.env(k, v);
+        }
+
+        let mut child = command.spawn().with_context(|| {
+            format!("Failed to run command: {}", cmd.join(" "))
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("missing stdout"))?;
+        let stderr = child.stderr.take().ok_or_else(|| anyhow::anyhow!("missing stderr"))?;
+
+        let (tx, rx) = mpsc::channel::<(bool, String)>();
+        let tx_out = tx.clone();
+        let tx_err = tx.clone();
+
+        let out_handle = thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().flatten() {
+                let _ = tx_out.send((true, line));
+            }
+        });
+
+        let err_handle = thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().flatten() {
+                let _ = tx_err.send((false, line));
+            }
+        });
+
+        let start = Instant::now();
+        let mut last_beat = Instant::now();
+        let mut stdout_acc = String::new();
+        let mut stderr_acc = String::new();
+
+        loop {
+            match child.wait_timeout(Duration::from_secs(1))? {
+                Some(status) => {
+                    for msg in rx.try_iter() {
+                        if msg.0 {
+                            info!("[fetch stdout] {}", msg.1);
+                            stdout_acc.push_str(&msg.1);
+                            stdout_acc.push('\n');
+                        } else {
+                            warn!("[fetch stderr] {}", msg.1);
+                            stderr_acc.push_str(&msg.1);
+                            stderr_acc.push('\n');
+                        }
+                    }
+                    let _ = out_handle.join();
+                    let _ = err_handle.join();
+                    return Ok(CmdResult {
+                        status_code: status.code().unwrap_or(1),
+                        stdout: stdout_acc,
+                        stderr: stderr_acc,
+                        timed_out: false,
+                    });
+                }
+                None => {
+                    let mut received = false;
+                    loop {
+                        match rx.recv_timeout(Duration::from_millis(50)) {
+                            Ok((is_out, line)) => {
+                                received = true;
+                                if is_out {
+                                    info!("[fetch stdout] {}", line);
+                                    stdout_acc.push_str(&line);
+                                    stdout_acc.push('\n');
+                                } else {
+                                    warn!("[fetch stderr] {}", line);
+                                    stderr_acc.push_str(&line);
+                                    stderr_acc.push('\n');
+                                }
+                            }
+                            Err(RecvTimeoutError::Timeout) => break,
+                            Err(RecvTimeoutError::Disconnected) => break,
+                        }
+                    }
+
+                    if start.elapsed() >= timeout {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = out_handle.join();
+                        let _ = err_handle.join();
+                        return Ok(CmdResult {
+                            status_code: 124,
+                            stdout: stdout_acc,
+                            stderr: stderr_acc,
+                            timed_out: true,
+                        });
+                    }
+
+                    if !received && heartbeat.as_secs() > 0 && last_beat.elapsed() >= heartbeat {
+                        info!(elapsed_seconds = start.elapsed().as_secs(), "[fetch] still running...");
+                        last_beat = Instant::now();
+                    }
+                }
+            }
+        }
     }
 }
