@@ -50,3 +50,12 @@ identifiers_weight = 2
 tags_weight = 1
 comments_weight = 1
 cover_weight = 1
+
+[dups]
+# Defaults for the dups subcommand
+threads = 8
+min_size = 1024
+include_sidecars = false
+follow_symlinks = false
+ext = ["epub", "mobi", "azw3", "pdf", "djvu"]
+output = "json"

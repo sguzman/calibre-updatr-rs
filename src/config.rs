@@ -60,6 +60,7 @@ pub struct Config {
     pub fetch: FetchConfig,
     pub policy: PolicyConfig,
     pub scoring: ScoringConfig,
+    pub dups: DupsConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -138,6 +139,17 @@ pub struct ScoringConfig {
     pub cover_weight: i32,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DupsConfig {
+    pub threads: usize,
+    pub min_size: u64,
+    pub include_sidecars: bool,
+    pub follow_symlinks: bool,
+    pub ext: Vec<String>,
+    pub output: String,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -150,6 +162,7 @@ impl Default for Config {
             fetch: FetchConfig::default(),
             policy: PolicyConfig::default(),
             scoring: ScoringConfig::default(),
+            dups: DupsConfig::default(),
         }
     }
 }
@@ -248,6 +261,19 @@ impl Default for ScoringConfig {
             tags_weight: 1,
             comments_weight: 1,
             cover_weight: 1,
+        }
+    }
+}
+
+impl Default for DupsConfig {
+    fn default() -> Self {
+        Self {
+            threads: 0,
+            min_size: 0,
+            include_sidecars: false,
+            follow_symlinks: false,
+            ext: Vec::new(),
+            output: "text".to_string(),
         }
     }
 }

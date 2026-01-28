@@ -5,7 +5,7 @@ use crate::calibre::{
 use crate::config::{
     init_tracing, load_config, normalize_library_spec, normalize_optional_string, Args, Command,
 };
-use crate::dups::run_dups;
+use crate::dups::{run_dups, DupsSettings, OutputFormat};
 use crate::metadata::{metadata_snapshot, score_good_enough, snapshot_hash};
 use crate::runner::Runner;
 use crate::state::{get_book_state, load_state, now_iso, put_book_state, save_state, BookState};
@@ -282,7 +282,43 @@ pub fn run() -> Result<()> {
         if !lib_path.is_dir() {
             anyhow::bail!("Library path does not exist or is not a directory: {}", lib_path.display());
         }
-        return run_dups(&lib_path, dups_args);
+        let output = dups_args
+            .output
+            .unwrap_or_else(|| parse_dups_output(&config.dups.output));
+        let ext = if dups_args.ext.is_empty() {
+            config.dups.ext.clone()
+        } else {
+            dups_args.ext.clone()
+        };
+        let threads = if dups_args.threads == 0 {
+            config.dups.threads
+        } else {
+            dups_args.threads
+        };
+        let min_size = if dups_args.min_size == 0 {
+            config.dups.min_size
+        } else {
+            dups_args.min_size
+        };
+        let include_sidecars = if dups_args.include_sidecars {
+            true
+        } else {
+            config.dups.include_sidecars
+        };
+        let follow_symlinks = if dups_args.follow_symlinks {
+            true
+        } else {
+            config.dups.follow_symlinks
+        };
+        let settings = DupsSettings {
+            output,
+            ext,
+            follow_symlinks,
+            threads,
+            min_size,
+            include_sidecars,
+        };
+        return run_dups(&lib_path, &settings);
     }
 
     require_tool("calibredb")?;
@@ -458,4 +494,11 @@ fn default_state_path() -> Result<PathBuf> {
     let dir = std::env::current_dir()?.join(".cache");
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join("state.json"))
+}
+
+fn parse_dups_output(value: &str) -> OutputFormat {
+    match value.trim().to_lowercase().as_str() {
+        "json" => OutputFormat::Json,
+        _ => OutputFormat::Text,
+    }
 }

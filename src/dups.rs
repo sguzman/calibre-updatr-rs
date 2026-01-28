@@ -18,8 +18,8 @@ pub struct DupsArgs {
     pub library: Option<PathBuf>,
 
     /// Output format
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub output: OutputFormat,
+    #[arg(long, value_enum)]
+    pub output: Option<OutputFormat>,
 
     /// Only consider these extensions (repeatable). Example: --ext epub --ext pdf
     #[arg(long)]
@@ -48,6 +48,16 @@ pub enum OutputFormat {
     Json,
 }
 
+#[derive(Debug, Clone)]
+pub struct DupsSettings {
+    pub output: OutputFormat,
+    pub ext: Vec<String>,
+    pub follow_symlinks: bool,
+    pub threads: usize,
+    pub min_size: u64,
+    pub include_sidecars: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct FileInfo {
     path: PathBuf,
@@ -62,21 +72,21 @@ struct DuplicateGroup {
     files: Vec<PathBuf>,
 }
 
-pub fn run_dups(library: &Path, args: &DupsArgs) -> Result<()> {
-    if args.threads > 0 {
-        info!(threads = args.threads, "Configuring Rayon thread pool");
+pub fn run_dups(library: &Path, settings: &DupsSettings) -> Result<()> {
+    if settings.threads > 0 {
+        info!(threads = settings.threads, "Configuring Rayon thread pool");
         rayon::ThreadPoolBuilder::new()
-            .num_threads(args.threads)
+            .num_threads(settings.threads)
             .build_global()
             .context("Failed to configure Rayon global thread pool")?;
     }
 
     let started = Instant::now();
 
-    let exts = if args.ext.is_empty() {
+    let exts = if settings.ext.is_empty() {
         default_exts()
     } else {
-        args.ext
+        settings.ext
             .iter()
             .map(|s| s.trim().trim_start_matches('.').to_ascii_lowercase())
             .filter(|s| !s.is_empty())
@@ -85,9 +95,9 @@ pub fn run_dups(library: &Path, args: &DupsArgs) -> Result<()> {
 
     info!(
         library = %library.display(),
-        follow_symlinks = args.follow_symlinks,
-        include_sidecars = args.include_sidecars,
-        min_size = args.min_size,
+        follow_symlinks = settings.follow_symlinks,
+        include_sidecars = settings.include_sidecars,
+        min_size = settings.min_size,
         exts = ?exts,
         "Starting duplicate scan"
     );
@@ -95,9 +105,9 @@ pub fn run_dups(library: &Path, args: &DupsArgs) -> Result<()> {
     let candidates = collect_candidates(
         library,
         &exts,
-        args.follow_symlinks,
-        args.min_size,
-        args.include_sidecars,
+        settings.follow_symlinks,
+        settings.min_size,
+        settings.include_sidecars,
     )?;
 
     info!(count = candidates.len(), "Collected candidate files");
@@ -124,7 +134,7 @@ pub fn run_dups(library: &Path, args: &DupsArgs) -> Result<()> {
         "Done"
     );
 
-    match args.output {
+    match settings.output {
         OutputFormat::Text => print_text(&dupes),
         OutputFormat::Json => print_json(&dupes)?,
     }
