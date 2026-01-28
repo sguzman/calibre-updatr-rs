@@ -22,13 +22,7 @@ Behavior
 
 Configuration
 -------------
-All settings live in `config.toml`. Start from the provided template and edit:
-- `log_level`
-- `library` or `library_url`
-- `calibre_username` / `calibre_password`
-- `headless_fetch` + `headless_env`
-- `formats`
-- processing policy knobs (reprocess, scoring, languages, throttling)
+All settings live in `config.toml` under categorized tables (`[logging]`, `[library]`, `[state]`, `[formats]`, `[calibredb]`, `[content_server]`, `[fetch]`, `[policy]`, `[scoring]`).
 Note: `config.toml` can include credentials; consider excluding it from version control.
 
 Usage
@@ -55,9 +49,5 @@ cargo run -- --config config.toml --library-url "http://localhost:8081/#en_nonfi
 
 State file
 ----------
-The state is stored in the library directory as:
-```
-.calibre_metadata_state.json
-```
-For remote libraries, the state file is stored in the current working directory
-unless `state_path` is supplied in config.
+The state is stored under `~/.cache/calibre-updatr/state.json` by default,
+or `state.path` in config if provided.

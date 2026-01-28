@@ -217,53 +217,56 @@ pub fn snapshot_hash(snap: &Snapshot) -> Result<String> {
     Ok(sha256_text(&stable))
 }
 
-pub fn score_good_enough(snap: &Snapshot) -> (i32, Vec<String>) {
+pub fn score_good_enough(
+    snap: &Snapshot,
+    scoring: &crate::config::ScoringConfig,
+) -> (i32, Vec<String>) {
     let mut score = 0;
     let mut reasons = Vec::new();
 
     if !snap.title.is_empty() {
-        score += 1;
+        score += scoring.title_weight;
     } else {
         reasons.push("missing title".to_string());
     }
     if !snap.authors.is_empty() {
-        score += 1;
+        score += scoring.authors_weight;
     } else {
         reasons.push("missing authors".to_string());
     }
     if !snap.publisher.is_empty() {
-        score += 1;
+        score += scoring.publisher_weight;
     } else {
         reasons.push("missing publisher".to_string());
     }
     if !snap.pubdate.is_empty() {
-        score += 1;
+        score += scoring.pubdate_weight;
     } else {
         reasons.push("missing pubdate".to_string());
     }
 
     if !snap.isbn.is_empty() {
-        score += 2;
+        score += scoring.isbn_weight;
     } else if !snap.identifiers.is_empty() {
-        score += 2;
+        score += scoring.identifiers_weight;
     } else {
         reasons.push("missing identifiers/isbn".to_string());
     }
 
     if !snap.tags.is_empty() {
-        score += 1;
+        score += scoring.tags_weight;
     } else {
         reasons.push("missing tags".to_string());
     }
 
     if snap.comments_present {
-        score += 1;
+        score += scoring.comments_weight;
     } else {
         reasons.push("missing description/comments".to_string());
     }
 
     if snap.cover_present {
-        score += 1;
+        score += scoring.cover_weight;
     } else {
         reasons.push("missing cover".to_string());
     }

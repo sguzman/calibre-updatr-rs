@@ -28,7 +28,7 @@ fn process_one_book(
     lib: &str,
     target_formats: &BTreeMap<String, ()>,
     reprocess_on_metadata_change: bool,
-    min_score_to_skip_fetch: i32,
+    scoring: &crate::config::ScoringConfig,
     delay_between_fetches_seconds: f64,
     dry_run: bool,
 ) -> Result<String> {
@@ -61,9 +61,10 @@ fn process_one_book(
         }
     }
 
-    let (score, reasons) = score_good_enough(&snap);
-    let good_enough =
-        score >= min_score_to_skip_fetch && !snap.title.is_empty() && !snap.authors.is_empty();
+    let (score, reasons) = score_good_enough(&snap, scoring);
+    let good_enough = score >= scoring.min_score_to_skip_fetch
+        && (!scoring.require_title || !snap.title.is_empty())
+        && (!scoring.require_authors || !snap.authors.is_empty());
 
     if good_enough {
         info!(
@@ -217,44 +218,43 @@ pub fn run() -> Result<()> {
 
     let config_path = PathBuf::from(&args.config);
     let mut config = load_config(&config_path)?;
-    config.library = normalize_optional_string(config.library);
-    config.library_url = normalize_optional_string(config.library_url);
-    config.state_path = normalize_optional_string(config.state_path);
-    config.calibre_username = normalize_optional_string(config.calibre_username);
-    config.calibre_password = normalize_optional_string(config.calibre_password);
+    config.library.path = normalize_optional_string(config.library.path);
+    config.library.url = normalize_optional_string(config.library.url);
+    config.state.path = normalize_optional_string(config.state.path);
+    config.content_server.username = normalize_optional_string(config.content_server.username);
+    config.content_server.password = normalize_optional_string(config.content_server.password);
 
     if args.library.is_some() {
-        config.library = args.library.clone();
-        config.library_url = None;
+        config.library.path = args.library.clone();
+        config.library.url = None;
     }
     if args.library_url.is_some() {
-        config.library_url = args.library_url.clone();
+        config.library.url = args.library_url.clone();
     }
     if args.calibre_username.is_some() {
-        config.calibre_username = args.calibre_username.clone();
+        config.content_server.username = args.calibre_username.clone();
     }
     if args.calibre_password.is_some() {
-        config.calibre_password = args.calibre_password.clone();
+        config.content_server.password = args.calibre_password.clone();
     }
     if args.dry_run {
-        config.dry_run = true;
+        config.policy.dry_run = true;
     }
 
-    init_tracing(&config.log_level);
+    init_tracing(&config.logging.level);
 
     let lib_raw = config
-        .library_url
+        .library
+        .url
         .clone()
-        .or(config.library.clone())
+        .or(config.library.path.clone())
         .ok_or_else(|| anyhow::anyhow!("Missing library or library_url in config"))?;
     let lib = normalize_library_spec(&lib_raw);
     let is_remote = lib.starts_with("http://") || lib.starts_with("https://");
-    let state_path = if let Some(p) = config.state_path.clone() {
+    let state_path = if let Some(p) = config.state.path.clone() {
         PathBuf::from(p)
-    } else if is_remote {
-        std::env::current_dir()?.join(".calibre_metadata_state.json")
     } else {
-        PathBuf::from(&lib).join(".calibre_metadata_state.json")
+        default_state_path()?
     };
 
     if !is_remote && !Path::new(&lib).is_dir() {
@@ -263,6 +263,7 @@ pub fn run() -> Result<()> {
 
     let target_formats: BTreeMap<String, ()> = config
         .formats
+        .list
         .iter()
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty())
@@ -273,27 +274,27 @@ pub fn run() -> Result<()> {
     }
 
     let runner = Runner {
-        calibredb_env_mode: config.calibredb_env,
-        debug_calibredb_env: config.debug_calibredb_env,
-        headless_fetch: config.headless_fetch,
-        headless_env: config.headless_env.clone(),
-        calibre_username: config.calibre_username.clone(),
-        calibre_password: config.calibre_password.clone(),
+        calibredb_env_mode: config.calibredb.env_mode,
+        debug_calibredb_env: config.calibredb.debug_env,
+        headless_fetch: config.fetch.headless,
+        headless_env: config.fetch.headless_env.clone(),
+        calibre_username: config.content_server.username.clone(),
+        calibre_password: config.content_server.password.clone(),
     };
 
     let mut state = load_state(&state_path)?;
     let books = list_candidate_books(
         &runner,
         &lib,
-        config.include_missing_language,
-        &config.english_codes,
+        config.policy.include_missing_language,
+        &config.policy.english_codes,
         &target_formats,
     )?;
 
     info!(library = %lib, "[info] library");
     if lib.starts_with("http://") || lib.starts_with("https://") {
         info!(
-            auth = %config.calibre_username.as_deref().unwrap_or("<none>"),
+            auth = %config.content_server.username.as_deref().unwrap_or("<none>"),
             "[info] calibre content server auth"
         );
     }
@@ -303,7 +304,7 @@ pub fn run() -> Result<()> {
         formats = %target_formats.keys().cloned().collect::<Vec<_>>().join(","),
         "[info] candidates (English-or-missing-language)"
     );
-    if config.dry_run {
+    if config.policy.dry_run {
         info!("[info] dry-run enabled (no changes will be written)");
     }
 
@@ -326,11 +327,11 @@ pub fn run() -> Result<()> {
             if let Some(prev_state) = prev {
                 if ["done", "skipped_good_enough", "embedded_only"]
                     .contains(&prev_state.status.as_str())
-                    && (!config.reprocess_on_metadata_change
+                    && (!config.policy.reprocess_on_metadata_change
                         || prev_state.last_hash == before_hash)
                 {
                     skipped += 1;
-                    let reason = if !config.reprocess_on_metadata_change {
+                    let reason = if !config.policy.reprocess_on_metadata_change {
                         "already processed"
                     } else {
                         "already processed for current metadata hash"
@@ -347,13 +348,13 @@ pub fn run() -> Result<()> {
                 workdir.path(),
                 &lib,
                 &target_formats,
-                config.reprocess_on_metadata_change,
-                config.min_score_to_skip_fetch,
-                config.delay_between_fetches_seconds,
-                config.dry_run,
+                config.policy.reprocess_on_metadata_change,
+                &config.scoring,
+                config.policy.delay_between_fetches_seconds,
+                config.policy.dry_run,
             )?;
 
-            if config.dry_run {
+            if config.policy.dry_run {
                 if ["done", "updated", "embedded_only"].contains(&action.as_str()) {
                     ok += 1;
                 } else if action == "failed" {
@@ -376,7 +377,7 @@ pub fn run() -> Result<()> {
 
         if let Err(err) = result {
             fail += 1;
-            if config.dry_run {
+            if config.policy.dry_run {
                 error!(id = book_id, title = %title, error = %err, "[fail] exception");
                 continue;
             }
@@ -394,11 +395,22 @@ pub fn run() -> Result<()> {
             put_book_state(&mut state, book_id, bs);
         }
 
-        if !config.dry_run {
+        if !config.policy.dry_run {
             save_state(&state_path, &mut state)?;
         }
     }
 
     info!(done_ok = ok, done_failed = fail, skipped, "[summary]");
     Ok(())
+}
+
+fn default_state_path() -> Result<PathBuf> {
+    let base = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".cache")))
+        .ok_or_else(|| anyhow::anyhow!("Unable to determine cache directory (set XDG_CACHE_HOME or HOME)"))?;
+    let dir = base.join("calibre-updatr");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join("state.json"))
 }

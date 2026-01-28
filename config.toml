@@ -1,33 +1,49 @@
-log_level = "info"
+[logging]
+level = "info"
 
-# Calibre library (set one)
-library = ""
-library_url = "http://127.0.0.1:8081/#en_nonfiction"
+[library]
+path = ""
+url = "http://127.0.0.1:8081/#en_nonfiction"
 
-# State file override (empty = default behavior)
-state_path = ""
+[state]
+# If empty, defaults to ~/.cache/calibre-updatr/state.json
+path = ""
 
-# Formats to process
-formats = ["epub"]
+[formats]
+list = ["epub"]
 
-# Dry-run (no changes)
-dry_run = false
+[calibredb]
+# "inherit", "clean", or "override"
+env_mode = "inherit"
+debug_env = false
 
-# calibredb environment handling: "inherit", "clean", or "override"
-calibredb_env = "inherit"
-debug_calibredb_env = false
+[content_server]
+username = "admin"
+password = "admin"
 
-# Content Server auth (if required for write operations)
-calibre_username = "admin"
-calibre_password = "admin"
-
-# Fetch settings
-headless_fetch = true
+[fetch]
+headless = true
 headless_env = { QT_QPA_PLATFORM = "offscreen", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox --disable-gpu --use-gl=swiftshader", QTWEBENGINE_DISABLE_GPU = "1", QT_OPENGL = "software", LIBGL_ALWAYS_SOFTWARE = "1" }
 
-# Processing policy
+[policy]
+dry_run = false
 reprocess_on_metadata_change = false
-min_score_to_skip_fetch = 6
 include_missing_language = true
 english_codes = ["en", "eng", "en-us", "en-gb"]
 delay_between_fetches_seconds = 0.35
+
+[scoring]
+# Weights for each metadata field
+min_score_to_skip_fetch = 6
+require_title = true
+require_authors = true
+
+title_weight = 1
+authors_weight = 1
+publisher_weight = 1
+pubdate_weight = 1
+isbn_weight = 2
+identifiers_weight = 2
+tags_weight = 1
+comments_weight = 1
+cover_weight = 1
