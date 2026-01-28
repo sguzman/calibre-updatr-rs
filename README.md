@@ -58,6 +58,7 @@ Options:
 - `--min-size` skip tiny files
 - `--threads` to control hashing parallelism
 - `--include-sidecars` to include `metadata.opf` / cover files
+- `--out` to write output to a file
 Defaults can also be set in `[dups]` in `config.toml`.
 
 State file

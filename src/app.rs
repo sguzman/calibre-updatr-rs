@@ -290,6 +290,7 @@ pub fn run() -> Result<()> {
         } else {
             dups_args.ext.clone()
         };
+        let out = dups_args.out.clone();
         let threads = if dups_args.threads == 0 {
             config.dups.threads
         } else {
@@ -312,6 +313,7 @@ pub fn run() -> Result<()> {
         };
         let settings = DupsSettings {
             output,
+            out,
             ext,
             follow_symlinks,
             threads,

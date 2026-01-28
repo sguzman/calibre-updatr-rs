@@ -21,6 +21,10 @@ pub struct DupsArgs {
     #[arg(long, value_enum)]
     pub output: Option<OutputFormat>,
 
+    /// Write output to a file (defaults to stdout)
+    #[arg(long)]
+    pub out: Option<PathBuf>,
+
     /// Only consider these extensions (repeatable). Example: --ext epub --ext pdf
     #[arg(long)]
     pub ext: Vec<String>,
@@ -51,6 +55,7 @@ pub enum OutputFormat {
 #[derive(Debug, Clone)]
 pub struct DupsSettings {
     pub output: OutputFormat,
+    pub out: Option<PathBuf>,
     pub ext: Vec<String>,
     pub follow_symlinks: bool,
     pub threads: usize,
@@ -135,8 +140,8 @@ pub fn run_dups(library: &Path, settings: &DupsSettings) -> Result<()> {
     );
 
     match settings.output {
-        OutputFormat::Text => print_text(&dupes),
-        OutputFormat::Json => print_json(&dupes)?,
+        OutputFormat::Text => print_text(&dupes, settings.out.as_deref())?,
+        OutputFormat::Json => print_json(&dupes, settings.out.as_deref())?,
     }
 
     Ok(())
@@ -284,32 +289,45 @@ fn find_duplicates(files: Vec<FileInfo>) -> Vec<DuplicateGroup> {
     groups
 }
 
-fn print_text(groups: &[DuplicateGroup]) {
+fn print_text(groups: &[DuplicateGroup], out: Option<&Path>) -> Result<()> {
+    let mut buf = String::new();
     if groups.is_empty() {
-        println!("No duplicates found (by full-file BLAKE3 hash).");
-        return;
-    }
-
-    println!("Duplicate groups: {}", groups.len());
-    println!();
-
-    for (i, g) in groups.iter().enumerate() {
-        println!(
-            "== Group {}: {} files | {} bytes | blake3 {} ==",
-            i + 1,
-            g.files.len(),
-            g.bytes,
-            g.blake3
-        );
-        for p in &g.files {
-            println!("  - {}", p.display());
+        buf.push_str("No duplicates found (by full-file BLAKE3 hash).\n");
+    } else {
+        buf.push_str(&format!("Duplicate groups: {}\n\n", groups.len()));
+        for (i, g) in groups.iter().enumerate() {
+            buf.push_str(&format!(
+                "== Group {}: {} files | {} bytes | blake3 {} ==\n",
+                i + 1,
+                g.files.len(),
+                g.bytes,
+                g.blake3
+            ));
+            for p in &g.files {
+                buf.push_str(&format!("  - {}\n", p.display()));
+            }
+            buf.push('\n');
         }
-        println!();
     }
+    write_output(&buf, out)?;
+    Ok(())
 }
 
-fn print_json(groups: &[DuplicateGroup]) -> Result<()> {
+fn print_json(groups: &[DuplicateGroup], out: Option<&Path>) -> Result<()> {
     let s = serde_json::to_string_pretty(groups)?;
-    println!("{s}");
+    write_output(&s, out)?;
+    Ok(())
+}
+
+fn write_output(contents: &str, out: Option<&Path>) -> Result<()> {
+    if let Some(path) = out {
+        let mut file = std::fs::File::create(path)
+            .with_context(|| format!("Failed to create {}", path.display()))?;
+        use std::io::Write;
+        file.write_all(contents.as_bytes())?;
+        file.write_all(b"\n")?;
+    } else {
+        println!("{contents}");
+    }
     Ok(())
 }
