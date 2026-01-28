@@ -78,9 +78,10 @@ impl Default for Config {
                 ("QTWEBENGINE_DISABLE_SANDBOX".to_string(), "1".to_string()),
                 (
                     "QTWEBENGINE_CHROMIUM_FLAGS".to_string(),
-                    "--no-sandbox --disable-gpu".to_string(),
+                    "--no-sandbox --disable-gpu --use-gl=swiftshader".to_string(),
                 ),
                 ("QTWEBENGINE_DISABLE_GPU".to_string(), "1".to_string()),
+                ("QT_OPENGL".to_string(), "software".to_string()),
                 ("LIBGL_ALWAYS_SOFTWARE".to_string(), "1".to_string()),
             ]),
             calibre_username: None,

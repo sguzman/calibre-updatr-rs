@@ -2,7 +2,7 @@ log_level = "info"
 
 # Calibre library (set one)
 library = ""
-library_url = "http://localhost:8081/#en_nonfiction"
+library_url = "http://127.0.0.1:8081/#en_nonfiction"
 
 # State file override (empty = default behavior)
 state_path = ""
@@ -23,7 +23,7 @@ calibre_password = "admin"
 
 # Fetch settings
 headless_fetch = true
-headless_env = { QT_QPA_PLATFORM = "offscreen", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox --disable-gpu", QTWEBENGINE_DISABLE_GPU = "1", LIBGL_ALWAYS_SOFTWARE = "1" }
+headless_env = { QT_QPA_PLATFORM = "offscreen", QTWEBENGINE_DISABLE_SANDBOX = "1", QTWEBENGINE_CHROMIUM_FLAGS = "--no-sandbox --disable-gpu --use-gl=swiftshader", QTWEBENGINE_DISABLE_GPU = "1", QT_OPENGL = "software", LIBGL_ALWAYS_SOFTWARE = "1" }
 
 # Processing policy
 reprocess_on_metadata_change = false
