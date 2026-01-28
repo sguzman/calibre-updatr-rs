@@ -310,6 +310,7 @@ pub fn run() -> Result<()> {
         debug_calibredb_env: config.calibredb.debug_env,
         headless_fetch: config.fetch.headless,
         headless_env: config.fetch.headless_env.clone(),
+        fetch_use_xvfb: config.fetch.use_xvfb,
         calibre_username: config.content_server.username.clone(),
         calibre_password: config.content_server.password.clone(),
     };

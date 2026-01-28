@@ -46,6 +46,7 @@ pub struct Runner {
     pub debug_calibredb_env: bool,
     pub headless_fetch: bool,
     pub headless_env: HashMap<String, String>,
+    pub fetch_use_xvfb: bool,
     pub calibre_username: Option<String>,
     pub calibre_password: Option<String>,
 }
@@ -306,10 +307,21 @@ impl Runner {
             debug!(headless = true, "[fetch-ebook-metadata] using headless Qt/WebEngine env");
         }
 
-        let mut command = Command::new(&cmd[0]);
-        for arg in &cmd[1..] {
-            command.arg(arg);
-        }
+        let mut command = if self.fetch_use_xvfb {
+            let mut c = Command::new("xvfb-run");
+            c.arg("-a");
+            c.arg(&cmd[0]);
+            for arg in &cmd[1..] {
+                c.arg(arg);
+            }
+            c
+        } else {
+            let mut c = Command::new(&cmd[0]);
+            for arg in &cmd[1..] {
+                c.arg(arg);
+            }
+            c
+        };
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         command.env_clear();
         for (k, v) in env {

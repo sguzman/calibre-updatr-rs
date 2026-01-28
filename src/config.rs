@@ -99,6 +99,7 @@ pub struct FetchConfig {
     pub headless_env: HashMap<String, String>,
     pub timeout_seconds: u64,
     pub heartbeat_seconds: u64,
+    pub use_xvfb: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -206,6 +207,7 @@ impl Default for FetchConfig {
             ]),
             timeout_seconds: 45,
             heartbeat_seconds: 10,
+            use_xvfb: false,
         }
     }
 }
