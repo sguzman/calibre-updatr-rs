@@ -2,7 +2,7 @@
 level = "info"
 
 [library]
-path = ""
+path = "/drive/calibre/en_nonfiction/"
 url = "http://127.0.0.1:8081/#en_nonfiction"
 
 [state]
