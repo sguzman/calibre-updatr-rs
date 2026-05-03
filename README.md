@@ -1,67 +1,53 @@
-Calibre Metadata Updatr (Rust)
-==============================
+# Calibre Updatr
 
-Bulk metadata updater for Calibre EPUB books with idempotent processing.
+Calibre Updatr is a Rust CLI for bulk-updating metadata in a Calibre library and embedding the improved metadata back into EPUB files.
 
-Intent
-------
-- Iterate through a Calibre library and update metadata for EPUB books.
-- Prefer books that are English or missing language.
-- Fetch richer metadata when current data is incomplete.
-- Embed metadata directly into EPUB files after updating the Calibre DB.
-- Avoid reprocessing the same book on subsequent runs by default.
+## Intent
 
-Behavior
---------
-- **Idempotent by default**: each book is processed only once (per book id).
-  This is controlled by `REPROCESS_ON_METADATA_CHANGE` in `src/main.rs`.
-  - `false` (default): skip any book already processed successfully.
-  - `true`: reprocess a book when its metadata snapshot hash changes.
-- **Failure handling**: if a step fails, the error is recorded and the script continues.
-- **Embedding**: successful runs embed metadata into EPUB files via `calibredb embed_metadata`.
+Automate the repetitive work of scanning a Calibre library, deciding which books are worth enriching, fetching better metadata, and applying those updates in a repeatable way.
 
-Configuration
--------------
-All settings live in `config.toml` under categorized tables (`[logging]`, `[library]`, `[state]`, `[formats]`, `[calibredb]`, `[content_server]`, `[fetch]`, `[policy]`, `[scoring]`).
-Note: `config.toml` can include credentials; consider excluding it from version control.
+## Ambition
 
-Usage
------
-Requires `calibredb` and `fetch-ebook-metadata` on your PATH.
+The checked-in config, state handling, scoring/policy language, and duplicate-finder mode suggest an ambition beyond a one-off script: a durable personal-library maintenance tool with repeatable operational behavior.
 
-Logging
--------
-Uses `tracing` + `tracing-subscriber`. Control verbosity via `config.toml` or `RUST_LOG`:
+## Current Status
+
+The project already has a structured config system, state tracking, metadata fetch/update pipeline, and a duplicate-finder mode. It appears usable today for a controlled local library workflow.
+
+## Core Capabilities Or Focus Areas
+
+- Idempotent metadata update workflow for Calibre-managed books.
+- Policy/scoring-driven selection of books to process.
+- Metadata embedding back into EPUB files through Calibre tooling.
+- Persistent state tracking to skip previously processed items.
+- Duplicate discovery mode for library cleanup.
+
+## Project Layout
+
+- `src/`: Rust source for the main crate or application entrypoint.
+- `Cargo.toml`: crate or workspace manifest and the first place to check for package structure.
+
+## Setup And Requirements
+
+- Rust toolchain.
+- `calibredb` and `fetch-ebook-metadata` available on `PATH`.
+- A valid `config.toml` describing the local library and fetch policy.
+
+## Build / Run / Test Commands
+
 ```bash
-RUST_LOG=debug cargo run -- --config config.toml
-RUST_LOG=info cargo run -- --config config.toml
-```
-
-Run with config:
-```bash
+cargo build
+cargo test
 cargo run -- --config config.toml
+cargo run -- dups --library /path/to/Calibre\ Library
 ```
 
-Override config values from CLI (optional):
-```bash
-cargo run -- --config config.toml --library-url "http://localhost:8081/#en_nonfiction"
-```
+## Notes, Limitations, Or Known Gaps
 
-Duplicate Finder
-----------------
-Find duplicates by full-file BLAKE3 hash (fast + parallel):
-```bash
-cargo run -- dups --library "/path/to/Calibre Library"
-```
-Options:
-- `--ext` repeatable extension filter (e.g. `--ext epub --ext pdf`)
-- `--min-size` skip tiny files
-- `--threads` to control hashing parallelism
-- `--include-sidecars` to include `metadata.opf` / cover files
-- `--out` to write output to a file
-Defaults can also be set in `[dups]` in `config.toml`.
+- This workflow is designed around a local Calibre installation and its companion tools.
+- A config file is part of the normal runtime, not an optional extra.
 
-State file
-----------
-The state is stored under `./.cache/state.json` by default,
-or `state.path` in config if provided.
+## Next Steps Or Roadmap Hints
+
+- Expand fixtures and dry-run affordances so metadata policy changes are easier to validate before writing.
+- Clarify the stable policy surface as heuristics mature.
